@@ -1,0 +1,12 @@
+
+
+type Query {
+  # ... your existing queries
+  me: User
+}
+
+type Mutation {
+  # ... your existing mutations
+  googleAuth(code: String!): AuthResponse
+  logout: Boolean!
+} 
