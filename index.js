@@ -22,6 +22,14 @@ app.use(cors({
   origin: process.env.FRONTEND_URL, // Your frontend URL
   credentials: true
 }));
+
+// Add Cross-Origin headers for WebContainer compatibility
+app.use((req, res, next) => {
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
+  next();
+});
+
 // app.use(cors({
 //   origin: function (origin, callback) {
 //     // Allow all origins (or allow specific ones dynamically)
