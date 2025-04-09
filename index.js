@@ -1,4 +1,5 @@
 const express = require('express');
+const dotenv = require('dotenv');
 const { ApolloServer } = require('@apollo/server');
 const { expressMiddleware } = require('@apollo/server/express4');
 const { createServer } = require('http');
@@ -10,22 +11,24 @@ const { resolvers, tokenBlacklist } = require('./resolvers');
 const authMiddleware = require('./authMiddleware');
 const cors = require('cors');
 
+dotenv.config();
+
 const app = express();
 
 // Order matters! First parse JSON, then apply other middleware
 app.use(express.json());
 
-// app.use(cors({
-//   origin: 'http://localhost:5173', // Your frontend URL
-//   credentials: true
-// }));
 app.use(cors({
-  origin: function (origin, callback) {
-    // Allow all origins (or allow specific ones dynamically)
-    callback(null, true);
-  },
+  origin: process.env.FRONTEND_URL, // Your frontend URL
   credentials: true
 }));
+// app.use(cors({
+//   origin: function (origin, callback) {
+//     // Allow all origins (or allow specific ones dynamically)
+//     callback(null, true);
+//   },
+//   credentials: true
+// }));
 
 // app.use(cors());
 app.use(authMiddleware);
