@@ -261,13 +261,15 @@ const resolvers = {
         });
 
         if (!chatSession) {
-          return null;
+          throw new Error('Chat session not found');
         }
 
         return {
           id: chatSession._id,
           sessionId: chatSession.sessionId,
+          title: chatSession.title,
           messages: chatSession.messages,
+          folderStructure: chatSession.folderStructure,
           createdAt: chatSession.createdAt,
           updatedAt: chatSession.updatedAt
         };
@@ -284,7 +286,7 @@ const resolvers = {
 
         const sessions = await ChatSession.find({ userId: req.user.userId })
           .sort({ updatedAt: -1 })
-          .select('sessionId createdAt updatedAt');
+          .select('sessionId createdAt updatedAt title');
 
         return sessions;
       } catch (error) {
@@ -392,6 +394,32 @@ const resolvers = {
         throw new Error('Failed to delete chat session');
       }
     },
+    saveFiles: async (_, { sessionId, files,title }, { req }) => {
+      try {
+        if (!req.user) {
+          throw new Error('Not authenticated');
+        }
+
+        const chatSession = await ChatSession.findOne({
+          userId: req.user.userId,
+          sessionId
+        });
+
+        if (!chatSession) {
+          throw new Error('Chat session not found');
+        }
+
+        // Update the folder structure
+        chatSession.folderStructure = files;
+        chatSession.title = title;
+        await chatSession.save();
+
+        return true;
+      } catch (error) {
+        console.error('Error saving files:', error);
+        throw new Error('Failed to save files');
+      }
+    },
   },
   Subscription: {
     aiResponse: {
@@ -401,6 +429,9 @@ const resolvers = {
           if (!context?.req?.user) {
             console.log("Not authenticated");
             throw new Error('Not authenticated');
+          }
+          if(!prompt&&!messages.length){
+            throw new Error('Prompt or messages are required');
           }
 
           let chatSession;

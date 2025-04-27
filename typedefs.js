@@ -25,6 +25,7 @@ const typeDefs = `#graphql
   googleAuth(code: String!): AuthResponse
   logout: Boolean!
   deleteChatSession(sessionId: String!): Boolean!
+  saveFiles(sessionId: String!, files: [FileInput!]!,title: String): Boolean!
 } 
 
   type User {
@@ -48,16 +49,31 @@ const typeDefs = `#graphql
     timestamp: String!
   }
 
+  type File {
+    path: String!
+    content: String!
+    type: String!
+  }
+
+  input FileInput {
+    path: String!
+    content: String!
+    type: String!
+  }
+
   type ChatSession {
     id: ID!
     sessionId: String!
+    title: String
     messages: [Message!]!
+    folderStructure: [File]
     createdAt: String!
     updatedAt: String!
   }
 
   type ChatSessionSummary {
     sessionId: String!
+    title: String
     createdAt: String!
     updatedAt: String!
   }
