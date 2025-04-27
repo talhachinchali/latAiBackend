@@ -10,6 +10,7 @@ const typeDefs = require('./typedefs');
 const { resolvers, tokenBlacklist } = require('./resolvers');
 const authMiddleware = require('./authMiddleware');
 const cors = require('cors');
+const jwt = require('jsonwebtoken');
 
 dotenv.config();
 
@@ -60,8 +61,31 @@ const wsServer = new WebSocketServer({
   path: '/graphql',
 });
 
-// Use the WebSocket server
-const serverCleanup = useServer({ schema }, wsServer);
+// Use the WebSocket server with context
+const serverCleanup = useServer({
+  schema,
+  context: async (ctx) => {
+    // Get the authorization header from the connection params
+    const authHeader = ctx.connectionParams?.authorization;
+    if (!authHeader) {
+      return { req: { user: null } };
+    }
+
+    try {
+      const token = authHeader.replace('Bearer ', '');
+      // Check if token is blacklisted
+      if (tokenBlacklist.has(token)) {
+        return { req: { user: null } };
+      }
+
+      const decoded = jwt.verify(token, process.env.SESSION_SECRET);
+      return { req: { user: decoded } };
+    } catch (err) {
+      console.error('Token verification failed:', err);
+      return { req: { user: null } };
+    }
+  }
+}, wsServer);
 
 // Start server and apply middleware
 async function startServer() {
@@ -70,7 +94,6 @@ async function startServer() {
   app.use('/graphql', 
     expressMiddleware(server, {
       context: async ({ req, res }) => {
-        // Make sure to return the context object
         return {
           req,
           res
