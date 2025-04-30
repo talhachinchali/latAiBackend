@@ -77,7 +77,7 @@ const serverCleanup = useServer({
       if (tokenBlacklist.has(token)) {
         return { req: { user: null } };
       }
-
+console.log("pppp",process.env.SESSION_SECRET,token)
       const decoded = jwt.verify(token, process.env.SESSION_SECRET);
       return { req: { user: decoded } };
     } catch (err) {

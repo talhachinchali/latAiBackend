@@ -3,6 +3,7 @@ const { tokenBlacklist } = require('./resolvers'); // Export tokenBlacklist from
 
 const authMiddleware = async (req, res, next) => {
   console.log("baby he loves you  2",req.body)
+  console.log("papapa",process.env.SESSION_SECRET)
   // Skip auth check for Google Auth mutation
   const isGoogleAuthOperation = req.body?.query?.includes('mutation GoogleAuth');
   if (isGoogleAuthOperation) {
