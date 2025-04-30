@@ -13,6 +13,7 @@ const GoogleStrategy = require('passport-google-oauth20').Strategy;
 const jwt = require('jsonwebtoken');
 const { google } = require('googleapis');
 const User = require('./models/User');
+const ChatSession = require('./models/ChatSession');
 require('./db/connection'); // Add this at the top with other requires
 
 const pubsub = createPubSub();
@@ -248,6 +249,51 @@ const resolvers = {
         throw new Error('Not authenticated');
       }
     },
+    getChatHistory: async (_, { sessionId }, { req }) => {
+      try {
+        if (!req.user) {
+          throw new Error('Not authenticated');
+        }
+
+        const chatSession = await ChatSession.findOne({
+          userId: req.user.userId,
+          sessionId
+        });
+
+        if (!chatSession) {
+          throw new Error('Chat session not found');
+        }
+
+        return {
+          id: chatSession._id,
+          sessionId: chatSession.sessionId,
+          title: chatSession.title,
+          messages: chatSession.messages,
+          folderStructure: chatSession.folderStructure,
+          createdAt: chatSession.createdAt,
+          updatedAt: chatSession.updatedAt
+        };
+      } catch (error) {
+        console.error('Error fetching chat history:', error);
+        throw new Error('Failed to fetch chat history');
+      }
+    },
+    getUserChatSessions: async (_, __, { req }) => {
+      try {
+        if (!req.user) {
+          throw new Error('Not authenticated');
+        }
+
+        const sessions = await ChatSession.find({ userId: req.user.userId })
+          .sort({ updatedAt: -1 })
+          .select('sessionId createdAt updatedAt title');
+
+        return sessions;
+      } catch (error) {
+        console.error('Error fetching user chat sessions:', error);
+        throw new Error('Failed to fetch chat sessions');
+      }
+    },
   },
   Mutation: {
     googleAuth: async (_, { code }, { req }) => {
@@ -331,16 +377,79 @@ const resolvers = {
         throw new Error("Logout failed");
       }
     },
+    deleteChatSession: async (_, { sessionId }, { req }) => {
+      try {
+        if (!req.user) {
+          throw new Error('Not authenticated');
+        }
+
+        const result = await ChatSession.deleteOne({
+          userId: req.user.userId,
+          sessionId
+        });
+
+        return result.deletedCount > 0;
+      } catch (error) {
+        console.error('Error deleting chat session:', error);
+        throw new Error('Failed to delete chat session');
+      }
+    },
+    saveFiles: async (_, { sessionId, files,title }, { req }) => {
+      try {
+        if (!req.user) {
+          throw new Error('Not authenticated');
+        }
+
+        const chatSession = await ChatSession.findOne({
+          userId: req.user.userId,
+          sessionId
+        });
+
+        if (!chatSession) {
+          throw new Error('Chat session not found');
+        }
+
+        // Update the folder structure
+        chatSession.folderStructure = files;
+        chatSession.title = title;
+        await chatSession.save();
+
+        return true;
+      } catch (error) {
+        console.error('Error saving files:', error);
+        throw new Error('Failed to save files');
+      }
+    },
   },
   Subscription: {
     aiResponse: {
-      subscribe: async (_, { prompt,suggestions,messages=[],image, sessionId = 'default',apiKey}) => {
+      subscribe: async (_, { prompt, suggestions, messages=[], image, sessionId = 'default', apiKey }, context) => {
         try {
-          console.log("apiKey",apiKey||process.env.GEMINI_API_KEY);
-          // console.log(messages,"messages");
+          // Check if user is authenticated
+          if (!context?.req?.user) {
+            console.log("Not authenticated");
+            throw new Error('Not authenticated');
+          }
+          if(!prompt&&!messages.length){
+            throw new Error('Prompt or messages are required');
+          }
+
           let chatSession;
-          if (!chatSessions.has(sessionId)||messages.length>0) {
-            const genAI = new GoogleGenerativeAI(apiKey||process.env.GEMINI_API_KEY);
+          let dbChatSession = await ChatSession.findOne({
+            userId: context.req.user.userId,
+            sessionId
+          });
+
+          if (!dbChatSession) {
+            dbChatSession = new ChatSession({
+              userId: context.req.user.userId,
+              sessionId,
+              messages: []
+            });
+          }
+
+          if (!chatSessions.has(sessionId) || messages.length > 0) {
+            const genAI = new GoogleGenerativeAI(apiKey || process.env.GEMINI_API_KEY);
             const model = genAI.getGenerativeModel({
               model: "gemini-2.0-flash",
             });
@@ -360,68 +469,84 @@ const resolvers = {
 
             await chatSession.sendMessage(getSystemPrompt());
            
-            for(let i=0;i<messages.length-1;i++){
-              await chatSession.sendMessage(messages[i]);
+            // Load previous messages from database
+            for (const msg of dbChatSession.messages) {
+              await chatSession.sendMessage(msg.content);
             }
+
+            // Add new messages
+            for (let i = 0; i < messages.length - 1; i++) {
+              await chatSession.sendMessage(messages[i]);
+              dbChatSession.messages.push({
+                role: 'user',
+                content: messages[i]
+              });
+            }
+
             chatSessions.set(sessionId, chatSession);
           } else {
             chatSession = chatSessions.get(sessionId);
           }
-let result;
-if(messages.length>0){
-  if(image){
-    const imagePart = {
-      inlineData: {
-        data: image,
-        mimeType: image.startsWith('data:image/') ? 
-          image.substring(5, image.indexOf(';')) : 'image/jpeg'
-      }
-    };
-    const textPart = { text: messages[messages.length-1] };
-    result = await chatSession.sendMessageStream([imagePart, textPart]);
-  }
-  else{
-  result = await chatSession.sendMessageStream(messages[messages.length-1]);
-}
-}
 
-else{
-  if(image){
-    const imagePart = {
-      inlineData: {
-        data: image,
-        mimeType: image.startsWith('data:image/') ? 
-          image.substring(5, image.indexOf(';')) : 'image/jpeg'
-      }
-    };
-    const textPart = { text: prompt };
-    result = await chatSession.sendMessageStream([imagePart, textPart]);
-  }
-  else{
-  result = await chatSession.sendMessageStream(prompt);
-}
-}
-          // Use the streaming API
-          // console.log(result,"result");
-          
-          // Create a unique channel for this subscription
-          console.log("chatSessions",chatSessions);
+          let result;
+          if (messages.length > 0) {
+            const lastMessage = messages[messages.length - 1];
+            
+            if (image) {
+              const imagePart = {
+                inlineData: {
+                  data: image,
+                  mimeType: image.startsWith('data:image/') ? 
+                    image.substring(5, image.indexOf(';')) : 'image/jpeg'
+                }
+              };
+              const textPart = { text: lastMessage };
+              result = await chatSession.sendMessageStream([imagePart, textPart]);
+            } else {
+              result = await chatSession.sendMessageStream(lastMessage);
+            }
 
-        
+            // Store user message
+            dbChatSession.messages.push({
+              role: 'user',
+              content: lastMessage
+            });
+          } else {
+            if (image) {
+              const imagePart = {
+                inlineData: {
+                  data: image,
+                  mimeType: image.startsWith('data:image/') ? 
+                    image.substring(5, image.indexOf(';')) : 'image/jpeg'
+                }
+              };
+              const textPart = { text: prompt };
+              result = await chatSession.sendMessageStream([imagePart, textPart]);
+            } else {
+              result = await chatSession.sendMessageStream(prompt);
+            }
+
+            // Store user message
+            dbChatSession.messages.push({
+              role: 'user',
+              content: prompt
+            });
+          }
+
           const channelId = `ai-response-${Date.now()}`;
+          let fullResponse = '';
 
           (async () => {
             try {
               for await (const chunk of result.stream) {
                 const text = await chunk.text();
-                // console.log( text); 
+                fullResponse += text;
                 
-                // Wait for the publish to complete before continuing
                 if (text) {
                   try {
                     await pubsub.publish(channelId, { 
                       aiResponse: text,
-                      __typename: 'AiResponse' // Add typename if needed
+                      __typename: 'AiResponse'
                     });
                   } catch (publishError) {
                     console.error('Error publishing chunk:', publishError);
@@ -429,7 +554,15 @@ else{
                 }
               }
               
-              // Ensure the completion signal is also properly awaited
+              // Store AI response
+              dbChatSession.messages.push({
+                role: 'assistant',
+                content: fullResponse
+              });
+
+              // Save the updated chat session
+              await dbChatSession.save();
+              
               await pubsub.publish(channelId, { 
                 aiResponse: null,
                 __typename: 'AiResponse'

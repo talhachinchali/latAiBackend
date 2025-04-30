@@ -4,6 +4,8 @@ const typeDefs = `#graphql
     template(prompt: String!,apiKey: String): TemplateResponse
     suggestCode(prompt: String!): String
      me: User
+    getChatHistory(sessionId: String!): ChatSession
+    getUserChatSessions: [ChatSessionSummary!]!
   }
 
   type AIResponse {
@@ -22,6 +24,8 @@ const typeDefs = `#graphql
   type Mutation {
   googleAuth(code: String!): AuthResponse
   logout: Boolean!
+  deleteChatSession(sessionId: String!): Boolean!
+  saveFiles(sessionId: String!, files: [FileInput!]!,title: String): Boolean!
 } 
 
   type User {
@@ -37,6 +41,41 @@ const typeDefs = `#graphql
   type AuthResponse {
     user: User!
     token: String!
+  }
+
+  type Message {
+    role: String!
+    content: String!
+    timestamp: String!
+  }
+
+  type File {
+    path: String!
+    content: String!
+    type: String!
+  }
+
+  input FileInput {
+    path: String!
+    content: String!
+    type: String!
+  }
+
+  type ChatSession {
+    id: ID!
+    sessionId: String!
+    title: String
+    messages: [Message!]!
+    folderStructure: [File]
+    createdAt: String!
+    updatedAt: String!
+  }
+
+  type ChatSessionSummary {
+    sessionId: String!
+    title: String
+    createdAt: String!
+    updatedAt: String!
   }
 `;
 
