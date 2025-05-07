@@ -425,6 +425,7 @@ const resolvers = {
     aiResponse: {
       subscribe: async (_, { prompt, suggestions, messages=[], image, sessionId = 'default', apiKey }, context) => {
         try {
+          console.log("prompt1",prompt)
           // Check if user is authenticated
           if (!context?.req?.user) {
             console.log("Not authenticated");
@@ -447,47 +448,66 @@ const resolvers = {
               messages: []
             });
           }
-
+          console.log("chatSessions araha hai bhai")
           if (!chatSessions.has(sessionId) || messages.length > 0) {
-            const genAI = new GoogleGenerativeAI(apiKey || process.env.GEMINI_API_KEY);
-            const model = genAI.getGenerativeModel({
-              model: "gemini-2.0-flash",
-            });
-
-            const generationConfig = {
-              temperature: 1,
-              topP: 0.95,
-              topK: 40,
-              maxOutputTokens: 8192,
-              responseMimeType: "text/plain",
-            };
-
-            chatSession = model.startChat({
-              generationConfig,
-              history: [],
-            });
-
-            await chatSession.sendMessage(getSystemPrompt());
-           
-            // Load previous messages from database
-            for (const msg of dbChatSession.messages) {
-              await chatSession.sendMessage(msg.content);
-            }
-
-            // Add new messages
-            for (let i = 0; i < messages.length - 1; i++) {
-              await chatSession.sendMessage(messages[i]);
-              dbChatSession.messages.push({
-                role: 'user',
-                content: messages[i]
+            try {
+              const genAI = new GoogleGenerativeAI(apiKey || process.env.GEMINI_API_KEY);
+              const model = genAI.getGenerativeModel({
+                model: "gemini-2.0-flash",
               });
-            }
 
-            chatSessions.set(sessionId, chatSession);
+              const generationConfig = {
+                temperature: 1,
+                topP: 0.95,
+                topK: 40,
+                maxOutputTokens: 8192,
+                responseMimeType: "text/plain",
+              };
+
+              // Initialize chat history array
+              const chatHistory = [];
+
+              // Add system prompt as first user message
+              chatHistory.push({
+                role: 'user',
+                parts: [{ text: getSystemPrompt() }]
+              });
+
+              // Add previous messages from database to history
+              if (dbChatSession.messages && dbChatSession.messages.length > 0) {
+                chatHistory.push(...dbChatSession.messages.map(msg => ({
+                  role: msg.role === 'assistant' ? 'model' : 'user',
+                  parts: [{ text: msg.content }]
+                })));
+              }
+
+              // Add new messages to history
+              for (let i = 0; i < messages.length - 1; i++) {
+                chatHistory.push({
+                  role: 'user',
+                  parts: [{ text: messages[i] }]
+                });
+                dbChatSession.messages.push({
+                  role: 'user',
+                  content: messages[i]
+                });
+              }
+
+              // Start chat with complete history
+              chatSession = model.startChat({
+                generationConfig,
+                history: chatHistory
+              });
+
+              chatSessions.set(sessionId, chatSession);
+            } catch (error) {
+              console.error('Error initializing chat session:', error);
+              throw new Error(`Failed to initialize chat session: ${error.message}`);
+            }
           } else {
             chatSession = chatSessions.get(sessionId);
           }
-
+console.log("yahan bhi araha hai kya tu")
           let result;
           if (messages.length > 0) {
             const lastMessage = messages[messages.length - 1];
@@ -523,8 +543,11 @@ const resolvers = {
               const textPart = { text: prompt };
               result = await chatSession.sendMessageStream([imagePart, textPart]);
             } else {
+              console.log("prompt2 bhi araha hai",prompt)
               result = await chatSession.sendMessageStream(prompt);
             }
+
+            console.log("prompt",prompt)
 
             // Store user message
             dbChatSession.messages.push({
